@@ -1,0 +1,255 @@
+"""
+E-commerce Sales Data Analyzer
+================================
+Author    : Vishal Bhardwaj
+Tech Stack: Python, Pandas, CSV
+Description:
+    Reads raw e-commerce sales data, cleans it, analyzes it,
+    and generates a detailed summary report automatically.
+
+HOW TO RUN:
+    pip install pandas
+    python sales_analyzer.py
+"""
+
+import pandas as pd
+import os
+from datetime import datetime
+
+
+# ═══════════════════════════════════════════════════════════════
+#  STEP 1 — LOAD DATA
+# ═══════════════════════════════════════════════════════════════
+def load_data(filepath):
+    """Load CSV file into a Pandas DataFrame."""
+    print(f"\nLoading data from: {filepath}")
+    try:
+        df = pd.read_csv(filepath)
+        print(f"Loaded {len(df)} rows and {len(df.columns)} columns.")
+        return df
+    except FileNotFoundError:
+        print(f"ERROR: File '{filepath}' not found!")
+        exit()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  STEP 2 — CLEAN DATA
+# ═══════════════════════════════════════════════════════════════
+def clean_data(df):
+    """
+    Clean the raw data:
+      - Remove rows with missing values
+      - Fix data types
+      - Remove duplicates
+      - Add calculated columns
+    """
+    print("\n--- DATA CLEANING ---")
+    original_count = len(df)
+
+    # 2a. Show missing values before cleaning
+    print(f"Missing values found:\n{df.isnull().sum()}")
+
+    # 2b. Drop rows where Quantity or Price is missing
+    df.dropna(subset=['Quantity', 'Price'], inplace=True)
+
+    # 2c. Fix data types
+    df['Quantity'] = df['Quantity'].astype(int)
+    df['Price']    = df['Price'].astype(float)
+    df['Date']     = pd.to_datetime(df['Date'])  # convert to proper date format
+
+    # 2d. Remove duplicate rows
+    df.drop_duplicates(inplace=True)
+
+    # 2e. Strip extra spaces from text columns
+    df['Product']  = df['Product'].str.strip()
+    df['Status']   = df['Status'].str.strip()
+    df['Platform'] = df['Platform'].str.strip()
+
+    # 2f. Add calculated columns
+    df['Revenue']     = df['Quantity'] * df['Price']          # total sale value
+    df['Month']       = df['Date'].dt.month_name()            # month name
+    df['Week_Number'] = df['Date'].dt.isocalendar().week      # week number
+    df['Is_Returned'] = df['Status'] == 'Returned'            # boolean flag
+
+    cleaned_count = len(df)
+    print(f"\nRows before cleaning : {original_count}")
+    print(f"Rows after cleaning  : {cleaned_count}")
+    print(f"Rows removed         : {original_count - cleaned_count}")
+
+    return df
+
+
+# ═══════════════════════════════════════════════════════════════
+#  STEP 3 — ANALYZE DATA
+# ═══════════════════════════════════════════════════════════════
+def analyze_data(df):
+    """Run all analysis and return a results dictionary."""
+    print("\n--- ANALYZING DATA ---")
+
+    # Only count delivered orders for revenue (not returned)
+    delivered = df[df['Status'] == 'Delivered']
+    returned  = df[df['Status'] == 'Returned']
+
+    results = {}
+
+    # ── Overall Summary ──────────────────────────────────────────────────
+    results['total_orders']    = len(df)
+    results['total_delivered'] = len(delivered)
+    results['total_returned']  = len(returned)
+    results['total_revenue']   = delivered['Revenue'].sum()
+    results['total_units_sold']= delivered['Quantity'].sum()
+    results['return_rate']     = (len(returned) / len(df)) * 100
+    results['avg_order_value'] = delivered['Revenue'].mean()
+
+    # ── Best Selling Products ────────────────────────────────────────────
+    product_revenue = (
+        delivered.groupby('Product')['Revenue']
+        .sum()
+        .sort_values(ascending=False)
+        .reset_index()
+    )
+    product_revenue.columns = ['Product', 'Total Revenue (Rs.)']
+    results['top_products'] = product_revenue
+
+    # ── Monthly Revenue ──────────────────────────────────────────────────
+    monthly_revenue = (
+        delivered.groupby('Month')['Revenue']
+        .sum()
+        .reset_index()
+        .sort_values('Revenue', ascending=False)
+    )
+    monthly_revenue.columns = ['Month', 'Revenue (Rs.)']
+    results['monthly_revenue'] = monthly_revenue
+
+    # ── Platform Comparison ──────────────────────────────────────────────
+    platform_revenue = (
+        delivered.groupby('Platform')['Revenue']
+        .sum()
+        .reset_index()
+        .sort_values('Revenue', ascending=False)
+    )
+    platform_revenue.columns = ['Platform', 'Revenue (Rs.)']
+    results['platform_revenue'] = platform_revenue
+
+    # ── Return Analysis by Product ───────────────────────────────────────
+    return_by_product = (
+        df.groupby('Product')['Is_Returned']
+        .mean()
+        .mul(100)
+        .round(1)
+        .reset_index()
+        .sort_values('Is_Returned', ascending=False)
+    )
+    return_by_product.columns = ['Product', 'Return Rate (%)']
+    results['return_by_product'] = return_by_product
+
+    # ── Best Month ───────────────────────────────────────────────────────
+    results['best_month'] = monthly_revenue.iloc[0]['Month']
+    results['best_month_revenue'] = monthly_revenue.iloc[0]['Revenue (Rs.)']
+
+    # ── Best Product ─────────────────────────────────────────────────────
+    results['best_product'] = product_revenue.iloc[0]['Product']
+    results['best_product_revenue'] = product_revenue.iloc[0]['Total Revenue (Rs.)']
+
+    print("Analysis complete!")
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════
+#  STEP 4 — GENERATE REPORT
+# ═══════════════════════════════════════════════════════════════
+def generate_report(results, output_file="sales_report.txt"):
+    """Print report to console and save to a text file."""
+
+    report_lines = []
+
+    def line(text=""):
+        report_lines.append(text)
+        print(text)
+
+    line("=" * 60)
+    line("       E-COMMERCE SALES ANALYSIS REPORT")
+    line(f"       Generated by: Vishal Bhardwaj")
+    line(f"       Generated on: {datetime.now().strftime('%d %B %Y, %I:%M %p')}")
+    line("=" * 60)
+
+    # ── Overall Summary ──────────────────────────────────────────
+    line("\n[1] OVERALL SUMMARY")
+    line("-" * 40)
+    line(f"  Total Orders       : {results['total_orders']}")
+    line(f"  Delivered Orders   : {results['total_delivered']}")
+    line(f"  Returned Orders    : {results['total_returned']}")
+    line(f"  Return Rate        : {results['return_rate']:.1f}%")
+    line(f"  Total Units Sold   : {results['total_units_sold']}")
+    line(f"  Total Revenue      : Rs. {results['total_revenue']:,.0f}")
+    line(f"  Avg Order Value    : Rs. {results['avg_order_value']:,.0f}")
+
+    # ── Top Products ─────────────────────────────────────────────
+    line("\n[2] REVENUE BY PRODUCT (High to Low)")
+    line("-" * 40)
+    for _, row in results['top_products'].iterrows():
+        line(f"  {row['Product']:<25} Rs. {row['Total Revenue (Rs.)']:>8,.0f}")
+
+    line(f"\n  BEST SELLER: {results['best_product']} "
+         f"(Rs. {results['best_product_revenue']:,.0f})")
+
+    # ── Monthly Revenue ──────────────────────────────────────────
+    line("\n[3] MONTHLY REVENUE")
+    line("-" * 40)
+    for _, row in results['monthly_revenue'].iterrows():
+        line(f"  {row['Month']:<12} Rs. {row['Revenue (Rs.)']:>8,.0f}")
+
+    line(f"\n  BEST MONTH: {results['best_month']} "
+         f"(Rs. {results['best_month_revenue']:,.0f})")
+
+    # ── Platform Comparison ──────────────────────────────────────
+    line("\n[4] PLATFORM COMPARISON")
+    line("-" * 40)
+    for _, row in results['platform_revenue'].iterrows():
+        line(f"  {row['Platform']:<15} Rs. {row['Revenue (Rs.)']:>8,.0f}")
+
+    # ── Return Rate by Product ───────────────────────────────────
+    line("\n[5] RETURN RATE BY PRODUCT")
+    line("-" * 40)
+    for _, row in results['return_by_product'].iterrows():
+        line(f"  {row['Product']:<25} {row['Return Rate (%)']:>5.1f}%")
+
+    # ── Recommendation ───────────────────────────────────────────
+    line("\n[6] RECOMMENDATIONS")
+    line("-" * 40)
+    line(f"  * Focus on '{results['best_product']}' — highest revenue generator.")
+    high_return = results['return_by_product'].iloc[0]['Product']
+    line(f"  * Review '{high_return}' — highest return rate. Check quality/sizing.")
+    line(f"  * '{results['best_month']}' was the strongest month — plan restocking early.")
+
+    line("\n" + "=" * 60)
+    line("  Report saved to: " + output_file)
+    line("=" * 60)
+
+    # Save report to file
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(report_lines))
+
+    print(f"\nReport also saved to '{output_file}'")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MAIN — Run everything
+# ═══════════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    print("=" * 60)
+    print("  E-COMMERCE SALES DATA ANALYZER")
+    print("  Developer: Vishal Bhardwaj")
+    print("=" * 60)
+
+    # Step 1: Load
+    df = load_data("sales_data.csv")
+
+    # Step 2: Clean
+    df = clean_data(df)
+
+    # Step 3: Analyze
+    results = analyze_data(df)
+
+    # Step 4: Report
+    generate_report(results, output_file="sales_report.txt")
